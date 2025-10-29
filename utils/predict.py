@@ -487,3 +487,7 @@ def predict_bark(image):
                 "origin": row.get("origin","N/A"),
                 "image": image_to_base64(img)
             }}
+if __name__ == "__main__":
+    from PIL import Image
+    img = Image.open("1.jpg")  # make sure the path is correct
+    print(predict_leaf(img))   # or predict_bark(img) based on what it is
