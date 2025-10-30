@@ -504,32 +504,55 @@ import requests
 device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
 
 # ============================================================
-# GOOGLE DRIVE FILE IDS (Replace with your real IDs)
+# GOOGLE DRIVE FILE IDS
 # ============================================================
-LEAF_FILE_ID = "12U8nEDWS4chnW71VaUMYwjP9VNXqIMqM"
-BARK_FILE_ID = "1G8-fXTN0DWcBKfKysxzlBN8zLGvYeKyc"
+LEAF_FILE_ID = "12U8nEDWS4chnW71VaUMYwjP9VNXqIMqM"  # Leaf model
+BARK_FILE_ID = "1G8-fXTN0DWcBKfKysxzlBN8zLGvYeKyc"  # Bark model
 
 # ============================================================
-# FIXED GOOGLE DRIVE DOWNLOAD HANDLER
+# IMPROVED GOOGLE DRIVE DOWNLOAD FUNCTION
 # ============================================================
 def download_from_drive(file_id: str, dest_path: str):
-    """Download a model from Google Drive safely."""
+    """
+    Download a file from Google Drive with confirmation handling.
+    Automatically detects if the file is already downloaded.
+    """
     if os.path.exists(dest_path):
         print(f"✅ Model already exists: {dest_path}")
         return
 
-    print(f"⬇️ Downloading model from Google Drive → {dest_path}")
-    download_url = f"https://drive.google.com/uc?export=download&id={file_id}"
-    session = requests.Session()
-    response = session.get(download_url, stream=True)
+    def _get_confirm_token(response):
+        for key, value in response.cookies.items():
+            if key.startswith("download_warning"):
+                return value
+        return None
 
-    if "html" in response.headers.get("Content-Type", ""):
+    def _save_response_content(response, destination):
+        CHUNK_SIZE = 32768
+        with open(destination, "wb") as f:
+            for chunk in response.iter_content(CHUNK_SIZE):
+                if chunk:
+                    f.write(chunk)
+
+    print(f"⬇️ Downloading model from Google Drive → {dest_path}")
+    URL = "https://docs.google.com/uc?export=download"
+    session = requests.Session()
+
+    response = session.get(URL, params={"id": file_id}, stream=True)
+    token = _get_confirm_token(response)
+
+    if token:
+        params = {"id": file_id, "confirm": token}
+        response = session.get(URL, params=params, stream=True)
+
+    # Safety check for invalid downloads (HTML error pages)
+    content_type = response.headers.get("Content-Type", "")
+    if "html" in content_type.lower():
         raise RuntimeError(
-            f"❌ Invalid file downloaded for {dest_path} — check the file ID or permissions."
+            f"❌ Invalid file downloaded for {dest_path} — check Drive sharing permissions or file ID."
         )
 
-    with open(dest_path, "wb") as f:
-        f.write(response.content)
+    _save_response_content(response, dest_path)
     print(f"✅ Downloaded: {dest_path}")
 
 # ============================================================
@@ -552,21 +575,18 @@ download_from_drive(LEAF_FILE_ID, LEAF_MODEL_PATH)
 download_from_drive(BARK_FILE_ID, BARK_MODEL_PATH)
 
 # ============================================================
-# FIND DATA FILES
+# DATA FILES
 # ============================================================
 LEAF_CSV_PATH = os.path.join(DATA_DIR, "train.csv")
 BARK_CSV_PATH = os.path.join(DATA_DIR, "Bark.csv")
 
 if not os.path.exists(LEAF_CSV_PATH):
     raise FileNotFoundError("❌ train.csv not found in data/")
-
 if not os.path.exists(BARK_CSV_PATH):
     raise FileNotFoundError("❌ Bark.csv not found in data/")
 
 print(f"✅ Using LEAF_CSV_PATH = {LEAF_CSV_PATH}")
 print(f"✅ Using BARK_CSV_PATH = {BARK_CSV_PATH}")
-print(f"✅ LEAF_MODEL_PATH = {LEAF_MODEL_PATH} (exists: {os.path.exists(LEAF_MODEL_PATH)})")
-print(f"✅ BARK_MODEL_PATH = {BARK_MODEL_PATH} (exists: {os.path.exists(BARK_MODEL_PATH)})")
 
 # ============================================================
 # HELPER FUNCTIONS
@@ -581,14 +601,14 @@ def load_csv(path):
     raise RuntimeError(f"Failed to read CSV: {path}")
 
 def _strip_module_prefix(state_dict):
-    """Removes 'module.' prefix from keys if model was saved using DataParallel."""
+    """Remove 'module.' prefix if model was saved with DataParallel."""
     return {
         (k[len("module."):] if k.startswith("module.") else k): v
         for k, v in state_dict.items()
     }
 
 def _extract_state_dict(obj):
-    """Extracts the actual state_dict from various checkpoint formats."""
+    """Extract state_dict from checkpoint formats."""
     if isinstance(obj, dict):
         for key in ("state_dict", "model_state_dict", "model"):
             if key in obj and isinstance(obj[key], dict):
@@ -743,6 +763,3 @@ def predict_bark(image: Image.Image) -> dict:
 
     except Exception as e:
         return {"error": f"Bark prediction failed: {str(e)}"}
-
-
-
