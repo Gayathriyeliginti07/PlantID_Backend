@@ -593,7 +593,8 @@ NUM_CLASSES_LEAF = len(class_names_leaf)
 leaf_model = models.resnet101(weights=None)
 leaf_model.fc = nn.Linear(leaf_model.fc.in_features, NUM_CLASSES_LEAF)
 
-loaded_leaf = torch.load(LEAF_MODEL_PATH, map_location="cpu")
+# ✅ Fix for PyTorch 2.6+ weights_only behavior
+loaded_leaf = torch.load(LEAF_MODEL_PATH, map_location="cpu", weights_only=False)
 
 def _strip_module_prefix(state_dict):
     return {(k[len("module."):] if k.startswith("module.") else k): v for k, v in state_dict.items()}
@@ -683,7 +684,8 @@ bark_model.fc = nn.Sequential(
     nn.Linear(bark_model.fc.in_features, len(bark_classes))
 )
 
-loaded_bark = torch.load(NEW_BARK_MODEL_PATH, map_location="cpu")
+# ✅ Fix for PyTorch 2.6+ weights_only behavior
+loaded_bark = torch.load(NEW_BARK_MODEL_PATH, map_location="cpu", weights_only=False)
 sd = _extract_state_dict(loaded_bark)
 if sd:
     bark_model.load_state_dict(sd, strict=False)
@@ -737,7 +739,4 @@ def predict_bark(image: Image.Image) -> dict:
 
     except Exception as e:
         return {"error": f"Bark prediction failed: {str(e)}"}
-
-
-
 
