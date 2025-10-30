@@ -782,14 +782,7 @@ def predict_bark(image: Image.Image) -> dict:
     except Exception as e:
         return { "error": f"An error occurred during bark prediction: {str(e)}" }
 
-# =========================
-# TEST LOADING
-# =========================
-if __name__ == "__main__":
-    print("✅ Leaf model loaded:", LEAF_MODEL_PATH)
-    print("✅ Leaf CSV loaded:", LEAF_CSV_PATH)
-    print("✅ Bark model loaded:", NEW_BARK_MODEL_PATH)
-    print("✅ Bark CSV loaded:", BARK_CSV_PATH)
+
 
 
 
