@@ -487,7 +487,6 @@
 #                 "origin": row.get("origin","N/A"),
 #                 "image": image_to_base64(img)
 #             }}
-
 import os
 import torch
 import torch.nn as nn
@@ -514,6 +513,7 @@ LEAF_FILE_ID = "12U8nEDWS4chnW71VaUMYwjP9VNXqIMqM"
 BARK_FILE_ID = "1G8-fXTN0DWcBKfKysxzlBN8zLGvYeKyc"
 
 def _gdrive_download(file_id: str, out_path: str):
+    """Downloads a file from Google Drive if not already present."""
     if os.path.exists(out_path) and os.path.getsize(out_path) > 0:
         return True
     try:
@@ -524,9 +524,11 @@ def _gdrive_download(file_id: str, out_path: str):
             url = f"https://drive.google.com/uc?id={file_id}&export=download"
             gdown.download(url, out_path, quiet=False)
         return True
-    except Exception:
+    except Exception as e:
+        print(f"⚠️ Failed to download from Google Drive: {e}")
         return False
 
+# Download model files
 leaf_out = os.path.join(MODEL_DIR, "resnet101_leaf_classifier.pth")
 bark_out = os.path.join(MODEL_DIR, "resnet101_final.pth")
 _gdrive_download(LEAF_FILE_ID, leaf_out)
@@ -544,32 +546,56 @@ BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 BACKEND_DIR = os.path.abspath(os.path.join(BASE_DIR, ".."))
 PROJECT_ROOT = os.path.abspath(os.path.join(BACKEND_DIR, ".."))
 
+# --- model paths ---
 LEAF_MODEL_PATH = next((p for p in [
     os.path.join(BACKEND_DIR, "model", "resnet101_leaf_classifier.pth"),
     os.path.join(PROJECT_ROOT, "backend", "model", "resnet101_leaf_classifier.pth"),
     os.path.join(PROJECT_ROOT, "model", "resnet101_leaf_classifier.pth")
 ] if os.path.exists(p)), None)
 
-# ✅ UPDATED: Leaf CSV path
+BARK_MODEL_PATH = next((p for p in [
+    os.path.join(BACKEND_DIR, "model", "resnet101_final.pth"),
+    os.path.join(PROJECT_ROOT, "backend", "model", "resnet101_final.pth"),
+    os.path.join(PROJECT_ROOT, "model", "resnet101_final.pth")
+] if os.path.exists(p)), None)
+
+# --- CSV paths (safe fallback) ---
+DEFAULT_LEAF_CSV = os.path.join(MODEL_DIR, "leaf_fallback.csv")
+DEFAULT_BARK_CSV = os.path.join(MODEL_DIR, "bark_fallback.csv")
+
 LEAF_CSV_PATH = next((p for p in [
     os.path.join(PROJECT_ROOT, "PlantID_Backend", "data", "train.csv"),
     os.path.join(BACKEND_DIR, "PlantID_Backend", "data", "train.csv")
-] if os.path.exists(p)), None)
+] if os.path.exists(p)), DEFAULT_LEAF_CSV)
 
-NEW_BARK_MODEL_PATH = os.path.join(BACKEND_DIR, "model", "resnet101_final.pth")
-if not os.path.exists(NEW_BARK_MODEL_PATH):
-    NEW_BARK_MODEL_PATH = None
-
-# ✅ UPDATED: Bark CSV path
 BARK_CSV_PATH = next((p for p in [
     os.path.join(PROJECT_ROOT, "PlantID_Backend", "data", "Bark.csv"),
     os.path.join(BACKEND_DIR, "PlantID_Backend", "data", "Bark.csv")
-] if os.path.exists(p)), None)
+] if os.path.exists(p)), DEFAULT_BARK_CSV)
+
+# --- create fallback CSVs if missing ---
+if not os.path.exists(DEFAULT_LEAF_CSV):
+    pd.DataFrame({
+        "label": ["sample_leaf"],
+        "common_name": ["Sample Leaf"],
+        "uses": ["Demo use"],
+        "origin": ["Unknown"]
+    }).to_csv(DEFAULT_LEAF_CSV, index=False)
+
+if not os.path.exists(DEFAULT_BARK_CSV):
+    pd.DataFrame({
+        "scientific_name": ["sample_bark"],
+        "general_name": ["Sample Bark"],
+        "uses": ["Demo use"],
+        "origin": ["Unknown"]
+    }).to_csv(DEFAULT_BARK_CSV, index=False)
 
 # =========================
 # HELPER FUNCTION: LOAD CSV
 # =========================
 def load_csv(path):
+    if not path or not os.path.exists(path):
+        raise FileNotFoundError(f"CSV file not found: {path}")
     encodings = ("utf-8", "latin1", "cp1252")
     for enc in encodings:
         try:
@@ -577,7 +603,7 @@ def load_csv(path):
         except Exception:
             continue
     with open(path, "r") as f:
-        raw = f.read().decode("utf-8", errors="replace")
+        raw = f.read()
     return pd.read_csv(pd.io.common.StringIO(raw), engine="python")
 
 # =========================
@@ -655,7 +681,7 @@ def predict_leaf(image: Image.Image) -> dict:
         probabilities = torch.softmax(outputs, dim=1)
         predicted_index = torch.argmax(probabilities, dim=1).item()
 
-        predicted_class_name = idx_to_class_leaf[predicted_index] if predicted_index < len(idx_to_class_leaf) else f"Unknown (Index {predicted_index})"
+        predicted_class_name = idx_to_class_leaf.get(predicted_index, f"Unknown (Index {predicted_index})")
 
         leaf_info = leaf_data[leaf_data["label"] == predicted_class_name]
         if not leaf_info.empty:
@@ -696,10 +722,10 @@ def _extract_state_dict(obj):
     return None
 
 loaded_bark = None
-if NEW_BARK_MODEL_PATH is not None:
-    loaded_bark = torch.load(NEW_BARK_MODEL_PATH, map_location="cpu")
+if BARK_MODEL_PATH is not None:
+    loaded_bark = torch.load(BARK_MODEL_PATH, map_location="cpu")
 else:
-    raise RuntimeError(f"Bark model not found at path: {NEW_BARK_MODEL_PATH}")
+    raise RuntimeError(f"Bark model not found at path: {BARK_MODEL_PATH}")
 
 bark_model = models.resnet101(weights=None)
 
@@ -781,6 +807,8 @@ def predict_bark(image: Image.Image) -> dict:
 
     except Exception as e:
         return { "error": f"An error occurred during bark prediction: {str(e)}" }
+
+
 
 
 
