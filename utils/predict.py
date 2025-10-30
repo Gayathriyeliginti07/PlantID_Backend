@@ -487,7 +487,6 @@
 #                 "origin": row.get("origin","N/A"),
 #                 "image": image_to_base64(img)
 #             }}
-
 import os
 import io
 import base64
@@ -497,6 +496,7 @@ from torchvision import models, transforms
 from PIL import Image
 import pandas as pd
 import requests
+from flask import Flask, request, jsonify
 
 # ============================================================
 # DEVICE CONFIGURATION
@@ -510,13 +510,9 @@ LEAF_FILE_ID = "12U8nEDWS4chnW71VaUMYwjP9VNXqIMqM"  # Leaf model
 BARK_FILE_ID = "1G8-fXTN0DWcBKfKysxzlBN8zLGvYeKyc"  # Bark model
 
 # ============================================================
-# IMPROVED GOOGLE DRIVE DOWNLOAD FUNCTION
+# GOOGLE DRIVE DOWNLOAD FUNCTION
 # ============================================================
 def download_from_drive(file_id: str, dest_path: str):
-    """
-    Download a file from Google Drive with confirmation handling.
-    Automatically detects if the file is already downloaded.
-    """
     if os.path.exists(dest_path):
         print(f"✅ Model already exists: {dest_path}")
         return
@@ -537,19 +533,15 @@ def download_from_drive(file_id: str, dest_path: str):
     print(f"⬇️ Downloading model from Google Drive → {dest_path}")
     URL = "https://docs.google.com/uc?export=download"
     session = requests.Session()
-
     response = session.get(URL, params={"id": file_id}, stream=True)
     token = _get_confirm_token(response)
-
     if token:
         params = {"id": file_id, "confirm": token}
         response = session.get(URL, params=params, stream=True)
 
-    # Safety check for invalid downloads (HTML error pages)
-    content_type = response.headers.get("Content-Type", "")
-    if "html" in content_type.lower():
+    if "html" in response.headers.get("Content-Type", "").lower():
         raise RuntimeError(
-            f"❌ Invalid file downloaded for {dest_path} — check Drive sharing permissions or file ID."
+            f"❌ Invalid download for {dest_path}. Check Drive sharing permissions."
         )
 
     _save_response_content(response, dest_path)
@@ -559,34 +551,18 @@ def download_from_drive(file_id: str, dest_path: str):
 # PATH CONFIGURATION
 # ============================================================
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-PROJECT_ROOT = os.path.abspath(os.path.join(BASE_DIR, ".."))
-
-MODEL_DIR = os.path.join(PROJECT_ROOT, "model")
-DATA_DIR = os.path.join(PROJECT_ROOT, "data")
+MODEL_DIR = os.path.join(BASE_DIR, "model")
+DATA_DIR = os.path.join(BASE_DIR, "data")
 os.makedirs(MODEL_DIR, exist_ok=True)
 
 LEAF_MODEL_PATH = os.path.join(MODEL_DIR, "resnet101_leaf_classifier.pth")
 BARK_MODEL_PATH = os.path.join(MODEL_DIR, "resnet101_final.pth")
 
-# ============================================================
-# AUTO DOWNLOAD MODELS
-# ============================================================
 download_from_drive(LEAF_FILE_ID, LEAF_MODEL_PATH)
 download_from_drive(BARK_FILE_ID, BARK_MODEL_PATH)
 
-# ============================================================
-# DATA FILES
-# ============================================================
 LEAF_CSV_PATH = os.path.join(DATA_DIR, "train.csv")
 BARK_CSV_PATH = os.path.join(DATA_DIR, "Bark.csv")
-
-if not os.path.exists(LEAF_CSV_PATH):
-    raise FileNotFoundError("❌ train.csv not found in data/")
-if not os.path.exists(BARK_CSV_PATH):
-    raise FileNotFoundError("❌ Bark.csv not found in data/")
-
-print(f"✅ Using LEAF_CSV_PATH = {LEAF_CSV_PATH}")
-print(f"✅ Using BARK_CSV_PATH = {BARK_CSV_PATH}")
 
 # ============================================================
 # HELPER FUNCTIONS
@@ -601,14 +577,12 @@ def load_csv(path):
     raise RuntimeError(f"Failed to read CSV: {path}")
 
 def _strip_module_prefix(state_dict):
-    """Remove 'module.' prefix if model was saved with DataParallel."""
     return {
         (k[len("module."):] if k.startswith("module.") else k): v
         for k, v in state_dict.items()
     }
 
 def _extract_state_dict(obj):
-    """Extract state_dict from checkpoint formats."""
     if isinstance(obj, dict):
         for key in ("state_dict", "model_state_dict", "model"):
             if key in obj and isinstance(obj[key], dict):
@@ -617,66 +591,54 @@ def _extract_state_dict(obj):
     return None
 
 # ============================================================
-# LOAD LEAF MODEL
+# LOAD MODELS AND LABELS
 # ============================================================
 leaf_data = load_csv(LEAF_CSV_PATH)
 leaf_data.columns = leaf_data.columns.str.strip().str.lower().str.replace(" ", "_")
+class_names_leaf = list(leaf_data["label"].unique())  # ✅ no sorting
 
-class_names_leaf = sorted(leaf_data["label"].unique())
-idx_to_class_leaf = {i: name for i, name in enumerate(class_names_leaf)}
+bark_data = load_csv(BARK_CSV_PATH)
+bark_data.columns = bark_data.columns.str.strip().str.lower().str.replace(" ", "_")
+bark_classes = list(bark_data["scientific_name"].unique())  # ✅ no sorting
 
+# ---- Leaf model ----
 NUM_CLASSES_LEAF = len(class_names_leaf)
 leaf_model = models.resnet101(weights=None)
 leaf_model.fc = nn.Linear(leaf_model.fc.in_features, NUM_CLASSES_LEAF)
-
 try:
-    loaded_leaf = torch.load(LEAF_MODEL_PATH, map_location="cpu", weights_only=False)
-    sd = _extract_state_dict(loaded_leaf)
+    ckpt = torch.load(LEAF_MODEL_PATH, map_location="cpu", weights_only=False)
+    sd = _extract_state_dict(ckpt)
     if sd:
         leaf_model.load_state_dict(sd, strict=False)
-    elif isinstance(loaded_leaf, nn.Module):
-        leaf_model = loaded_leaf
-    else:
-        raise RuntimeError("Leaf model checkpoint format not recognized.")
+    elif isinstance(ckpt, nn.Module):
+        leaf_model = ckpt
 except Exception as e:
-    raise RuntimeError(f"❌ Failed to load leaf model: {e}")
+    raise RuntimeError(f"Leaf model load failed: {e}")
+leaf_model.to(device).eval()
 
-leaf_model.eval()
-
-# ============================================================
-# LOAD BARK MODEL
-# ============================================================
-bark_data = load_csv(BARK_CSV_PATH)
-bark_data.columns = bark_data.columns.str.strip().str.lower().str.replace(" ", "_")
-
-bark_classes = sorted(bark_data["scientific_name"].unique())
+# ---- Bark model ----
 bark_model = models.resnet101(weights=None)
 bark_model.fc = nn.Sequential(
     nn.Dropout(0.4),
-    nn.Linear(bark_model.fc.in_features, len(bark_classes))
+    nn.Linear(bark_model.fc.in_features, len(bark_classes)),
 )
-
 try:
-    loaded_bark = torch.load(BARK_MODEL_PATH, map_location="cpu", weights_only=False)
-    sd = _extract_state_dict(loaded_bark)
+    ckpt = torch.load(BARK_MODEL_PATH, map_location="cpu", weights_only=False)
+    sd = _extract_state_dict(ckpt)
     if sd:
         bark_model.load_state_dict(sd, strict=False)
-    elif isinstance(loaded_bark, nn.Module):
-        bark_model = loaded_bark
-    else:
-        raise RuntimeError("Bark model checkpoint format not recognized.")
+    elif isinstance(ckpt, nn.Module):
+        bark_model = ckpt
 except Exception as e:
-    raise RuntimeError(f"❌ Failed to load bark model: {e}")
-
-bark_model.eval()
+    raise RuntimeError(f"Bark model load failed: {e}")
+bark_model.to(device).eval()
 
 # ============================================================
 # IMAGE TRANSFORMS
 # ============================================================
-image_size = 224
 leaf_transform = transforms.Compose([
-    transforms.Resize(image_size),
-    transforms.CenterCrop(image_size),
+    transforms.Resize(224),
+    transforms.CenterCrop(224),
     transforms.ToTensor(),
     transforms.Normalize([0.485, 0.456, 0.406],
                          [0.229, 0.224, 0.225]),
@@ -690,76 +652,75 @@ bark_transform = transforms.Compose([
 ])
 
 # ============================================================
-# IMAGE BASE64 HELPER
+# FLASK APP
 # ============================================================
+app = Flask(__name__)
+
 def image_to_base64(img: Image.Image) -> str:
     buf = io.BytesIO()
     img.save(buf, format="PNG")
     return base64.b64encode(buf.getvalue()).decode("utf-8")
 
-# ============================================================
-# LEAF PREDICTION
-# ============================================================
-def predict_leaf(image: Image.Image) -> dict:
-    try:
-        img_t = leaf_transform(image.convert("RGB")).unsqueeze(0).to(device)
-        leaf_model.to(device)
+@app.route("/")
+def home():
+    return jsonify({"message": "🌿 Plant Identification API is running!"})
 
-        with torch.no_grad():
-            outputs = leaf_model(img_t)
-            probs = torch.softmax(outputs, dim=1)[0]
+@app.route("/predict/leaf", methods=["POST"])
+def predict_leaf():
+    if "image" not in request.files:
+        return jsonify({"error": "No image uploaded"}), 400
 
-        top5_prob, top5_idx = torch.topk(probs, 5)
-        top5 = [
-            {"scientific_name": idx_to_class_leaf[i.item()], "probability": round(p.item() * 100, 2)}
-            for i, p in zip(top5_idx, top5_prob)
-        ]
+    image = Image.open(request.files["image"]).convert("RGB")
+    img_t = leaf_transform(image).unsqueeze(0).to(device)
+    with torch.no_grad():
+        outputs = leaf_model(img_t)
+        probs = torch.softmax(outputs, dim=1)[0]
 
-        best_idx = top5_idx[0].item()
-        best_class = idx_to_class_leaf[best_idx]
-        row = leaf_data[leaf_data["label"] == best_class]
+    top5_prob, top5_idx = torch.topk(probs, 5)
+    top5 = [
+        {"scientific_name": class_names_leaf[i.item()], "probability": round(p.item() * 100, 2)}
+        for i, p in zip(top5_idx, top5_prob)
+    ]
 
-        best_prediction = {
-            "scientific_name": best_class,
-            "common_name": row.iloc[0].get("common_name", "N/A") if not row.empty else "N/A",
-            "uses": row.iloc[0].get("uses", "N/A") if not row.empty else "N/A",
-            "origin": row.iloc[0].get("origin", "N/A") if not row.empty else "N/A",
-        }
+    best_class = class_names_leaf[top5_idx[0].item()]
+    row = leaf_data[leaf_data["label"] == best_class]
+    best_prediction = {
+        "scientific_name": best_class,
+        "common_name": row.iloc[0].get("common_name", "N/A") if not row.empty else "N/A",
+        "uses": row.iloc[0].get("uses", "N/A") if not row.empty else "N/A",
+        "origin": row.iloc[0].get("origin", "N/A") if not row.empty else "N/A",
+    }
 
-        return {"best_prediction": best_prediction, "top_5_predictions": top5}
+    return jsonify({"best_prediction": best_prediction, "top_5_predictions": top5})
 
-    except Exception as e:
-        return {"error": f"Leaf prediction failed: {str(e)}"}
+@app.route("/predict/bark", methods=["POST"])
+def predict_bark():
+    if "image" not in request.files:
+        return jsonify({"error": "No image uploaded"}), 400
 
-# ============================================================
-# BARK PREDICTION
-# ============================================================
-def predict_bark(image: Image.Image) -> dict:
-    try:
-        tensor = bark_transform(image.convert("RGB")).unsqueeze(0).to(device)
-        bark_model.to(device)
+    image = Image.open(request.files["image"]).convert("RGB")
+    tensor = bark_transform(image).unsqueeze(0).to(device)
+    with torch.no_grad():
+        outputs = bark_model(tensor)
+        probs = torch.softmax(outputs, dim=1)[0].cpu().numpy()
 
-        with torch.no_grad():
-            outputs = bark_model(tensor)
-            probs = torch.softmax(outputs, dim=1)[0].cpu().numpy()
+    top5_idx = probs.argsort()[-5:][::-1]
+    top5 = [
+        {"scientific_name": bark_classes[i], "probability": round(probs[i] * 100, 2)}
+        for i in top5_idx
+    ]
 
-        top5_idx = probs.argsort()[-5:][::-1]
-        top5 = [
-            {"scientific_name": bark_classes[i], "probability": round(probs[i] * 100, 2)}
-            for i in top5_idx
-        ]
+    best_class = bark_classes[top5_idx[0]]
+    row = bark_data[bark_data["scientific_name"].str.lower() == best_class.lower()]
+    best_prediction = {
+        "scientific_name": best_class,
+        "common_name": row.iloc[0].get("general_name", "N/A") if not row.empty else "N/A",
+        "uses": row.iloc[0].get("uses", "N/A") if not row.empty else "N/A",
+        "origin": row.iloc[0].get("origin", "N/A") if not row.empty else "N/A",
+    }
 
-        best_class = bark_classes[top5_idx[0]]
-        row = bark_data[bark_data["scientific_name"].str.lower() == best_class.lower()]
+    return jsonify({"best_prediction": best_prediction, "top_5_predictions": top5})
 
-        best_prediction = {
-            "scientific_name": best_class,
-            "common_name": row.iloc[0].get("general_name", "N/A") if not row.empty else "N/A",
-            "uses": row.iloc[0].get("uses", "N/A") if not row.empty else "N/A",
-            "origin": row.iloc[0].get("origin", "N/A") if not row.empty else "N/A",
-        }
+if __name__ == "__main__":
+    app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 5000)))
 
-        return {"best_prediction": best_prediction, "top_5_predictions": top5}
-
-    except Exception as e:
-        return {"error": f"Bark prediction failed: {str(e)}"}
