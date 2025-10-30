@@ -487,119 +487,108 @@
 #                 "origin": row.get("origin","N/A"),
 #                 "image": image_to_base64(img)
 #             }}
+
 import os
+import io
+import base64
 import torch
 import torch.nn as nn
 from torchvision import models, transforms
 from PIL import Image
 import pandas as pd
-import base64
-import io
 import requests
 
-# =========================
+# ============================================================
 # DEVICE CONFIGURATION
-# =========================
+# ============================================================
 device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
 
-# =========================
-# GOOGLE DRIVE FILE IDS
-# =========================
+# ============================================================
+# GOOGLE DRIVE FILE IDS (Replace with your real IDs)
+# ============================================================
 LEAF_FILE_ID = "12U8nEDWS4chnW71VaUMYwjP9VNXqIMqM"
 BARK_FILE_ID = "1G8-fXTN0DWcBKfKysxzlBN8zLGvYeKyc"
 
-# =========================
-# DOWNLOAD FROM DRIVE
-# =========================
+# ============================================================
+# FIXED GOOGLE DRIVE DOWNLOAD HANDLER
+# ============================================================
 def download_from_drive(file_id: str, dest_path: str):
-    """Download model from Google Drive if not found locally."""
+    """Download a model from Google Drive safely."""
     if os.path.exists(dest_path):
         print(f"✅ Model already exists: {dest_path}")
         return
-    print(f"⬇️ Downloading model from Google Drive → {dest_path}")
-    url = f"https://drive.google.com/uc?id={file_id}"
-    r = requests.get(url, stream=True)
-    if r.status_code == 200:
-        with open(dest_path, "wb") as f:
-            f.write(r.content)
-        print(f"✅ Downloaded: {dest_path}")
-    else:
-        raise RuntimeError(f"Failed to download model from Google Drive (ID: {file_id})")
 
-# =========================
+    print(f"⬇️ Downloading model from Google Drive → {dest_path}")
+    download_url = f"https://drive.google.com/uc?export=download&id={file_id}"
+    session = requests.Session()
+    response = session.get(download_url, stream=True)
+
+    if "html" in response.headers.get("Content-Type", ""):
+        raise RuntimeError(
+            f"❌ Invalid file downloaded for {dest_path} — check the file ID or permissions."
+        )
+
+    with open(dest_path, "wb") as f:
+        f.write(response.content)
+    print(f"✅ Downloaded: {dest_path}")
+
+# ============================================================
 # PATH CONFIGURATION
-# =========================
+# ============================================================
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 PROJECT_ROOT = os.path.abspath(os.path.join(BASE_DIR, ".."))
 
 MODEL_DIR = os.path.join(PROJECT_ROOT, "model")
+DATA_DIR = os.path.join(PROJECT_ROOT, "data")
 os.makedirs(MODEL_DIR, exist_ok=True)
 
 LEAF_MODEL_PATH = os.path.join(MODEL_DIR, "resnet101_leaf_classifier.pth")
-NEW_BARK_MODEL_PATH = os.path.join(MODEL_DIR, "resnet101_final.pth")
+BARK_MODEL_PATH = os.path.join(MODEL_DIR, "resnet101_final.pth")
 
-# Auto-download models if missing
+# ============================================================
+# AUTO DOWNLOAD MODELS
+# ============================================================
 download_from_drive(LEAF_FILE_ID, LEAF_MODEL_PATH)
-download_from_drive(BARK_FILE_ID, NEW_BARK_MODEL_PATH)
+download_from_drive(BARK_FILE_ID, BARK_MODEL_PATH)
 
-# =========================
-# FLEXIBLE CSV PATH CHECK
-# =========================
-LEAF_CSV_PATH = next((p for p in [
-    os.path.join(PROJECT_ROOT, "data", "train.csv"),
-    os.path.join(BASE_DIR, "data", "train.csv"),
-    os.path.join(PROJECT_ROOT, "backend", "data", "Leaf1", "Leaf1", "train.csv"),
-] if os.path.exists(p)), None)
+# ============================================================
+# FIND DATA FILES
+# ============================================================
+LEAF_CSV_PATH = os.path.join(DATA_DIR, "train.csv")
+BARK_CSV_PATH = os.path.join(DATA_DIR, "Bark.csv")
 
-BARK_CSV_PATH = next((p for p in [
-    os.path.join(PROJECT_ROOT, "data", "Bark.csv"),
-    os.path.join(BASE_DIR, "data", "Bark.csv"),
-    os.path.join(PROJECT_ROOT, "backend", "data", "tree-bark", "Bark.csv"),
-] if os.path.exists(p)), None)
+if not os.path.exists(LEAF_CSV_PATH):
+    raise FileNotFoundError("❌ train.csv not found in data/")
 
-if not LEAF_CSV_PATH or not os.path.exists(LEAF_CSV_PATH):
-    raise FileNotFoundError("❌ Could not find Leaf CSV file in any known location.")
-if not BARK_CSV_PATH or not os.path.exists(BARK_CSV_PATH):
-    raise FileNotFoundError("❌ Could not find Bark CSV file in any known location.")
+if not os.path.exists(BARK_CSV_PATH):
+    raise FileNotFoundError("❌ Bark.csv not found in data/")
 
 print(f"✅ Using LEAF_CSV_PATH = {LEAF_CSV_PATH}")
 print(f"✅ Using BARK_CSV_PATH = {BARK_CSV_PATH}")
 print(f"✅ LEAF_MODEL_PATH = {LEAF_MODEL_PATH} (exists: {os.path.exists(LEAF_MODEL_PATH)})")
-print(f"✅ BARK_MODEL_PATH = {NEW_BARK_MODEL_PATH} (exists: {os.path.exists(NEW_BARK_MODEL_PATH)})")
+print(f"✅ BARK_MODEL_PATH = {BARK_MODEL_PATH} (exists: {os.path.exists(BARK_MODEL_PATH)})")
 
-# =========================
-# HELPER FUNCTION: LOAD CSV
-# =========================
+# ============================================================
+# HELPER FUNCTIONS
+# ============================================================
 def load_csv(path):
-    if not path or not os.path.exists(path):
-        raise FileNotFoundError(f"CSV not found: {path}")
-    encodings = ("utf-8", "latin1", "cp1252")
+    encodings = ["utf-8", "latin1", "cp1252"]
     for enc in encodings:
         try:
-            return pd.read_csv(path, encoding=enc, engine="python")
+            return pd.read_csv(path, encoding=enc)
         except Exception:
             continue
-    raise ValueError(f"Failed to load CSV with all encodings: {path}")
-
-# =========================
-# LOAD LEAF MODEL & DATA
-# =========================
-leaf_data = load_csv(LEAF_CSV_PATH)
-leaf_data.columns = leaf_data.columns.str.strip().str.lower().str.replace(" ", "_")
-class_names_leaf = sorted(leaf_data["label"].unique())
-idx_to_class_leaf = {i: name for i, name in enumerate(class_names_leaf)}
-NUM_CLASSES_LEAF = len(class_names_leaf)
-
-leaf_model = models.resnet101(weights=None)
-leaf_model.fc = nn.Linear(leaf_model.fc.in_features, NUM_CLASSES_LEAF)
-
-# ✅ Fix for PyTorch 2.6+ weights_only behavior
-loaded_leaf = torch.load(LEAF_MODEL_PATH, map_location="cpu", weights_only=False)
+    raise RuntimeError(f"Failed to read CSV: {path}")
 
 def _strip_module_prefix(state_dict):
-    return {(k[len("module."):] if k.startswith("module.") else k): v for k, v in state_dict.items()}
+    """Removes 'module.' prefix from keys if model was saved using DataParallel."""
+    return {
+        (k[len("module."):] if k.startswith("module.") else k): v
+        for k, v in state_dict.items()
+    }
 
 def _extract_state_dict(obj):
+    """Extracts the actual state_dict from various checkpoint formats."""
     if isinstance(obj, dict):
         for key in ("state_dict", "model_state_dict", "model"):
             if key in obj and isinstance(obj[key], dict):
@@ -607,119 +596,140 @@ def _extract_state_dict(obj):
         return _strip_module_prefix(obj)
     return None
 
-if isinstance(loaded_leaf, nn.Module):
-    leaf_model = loaded_leaf
-else:
+# ============================================================
+# LOAD LEAF MODEL
+# ============================================================
+leaf_data = load_csv(LEAF_CSV_PATH)
+leaf_data.columns = leaf_data.columns.str.strip().str.lower().str.replace(" ", "_")
+
+class_names_leaf = sorted(leaf_data["label"].unique())
+idx_to_class_leaf = {i: name for i, name in enumerate(class_names_leaf)}
+
+NUM_CLASSES_LEAF = len(class_names_leaf)
+leaf_model = models.resnet101(weights=None)
+leaf_model.fc = nn.Linear(leaf_model.fc.in_features, NUM_CLASSES_LEAF)
+
+try:
+    loaded_leaf = torch.load(LEAF_MODEL_PATH, map_location="cpu", weights_only=False)
     sd = _extract_state_dict(loaded_leaf)
     if sd:
         leaf_model.load_state_dict(sd, strict=False)
+    elif isinstance(loaded_leaf, nn.Module):
+        leaf_model = loaded_leaf
     else:
-        raise RuntimeError("❌ Leaf model checkpoint unusable")
+        raise RuntimeError("Leaf model checkpoint format not recognized.")
+except Exception as e:
+    raise RuntimeError(f"❌ Failed to load leaf model: {e}")
 
 leaf_model.eval()
 
+# ============================================================
+# LOAD BARK MODEL
+# ============================================================
+bark_data = load_csv(BARK_CSV_PATH)
+bark_data.columns = bark_data.columns.str.strip().str.lower().str.replace(" ", "_")
+
+bark_classes = sorted(bark_data["scientific_name"].unique())
+bark_model = models.resnet101(weights=None)
+bark_model.fc = nn.Sequential(
+    nn.Dropout(0.4),
+    nn.Linear(bark_model.fc.in_features, len(bark_classes))
+)
+
+try:
+    loaded_bark = torch.load(BARK_MODEL_PATH, map_location="cpu", weights_only=False)
+    sd = _extract_state_dict(loaded_bark)
+    if sd:
+        bark_model.load_state_dict(sd, strict=False)
+    elif isinstance(loaded_bark, nn.Module):
+        bark_model = loaded_bark
+    else:
+        raise RuntimeError("Bark model checkpoint format not recognized.")
+except Exception as e:
+    raise RuntimeError(f"❌ Failed to load bark model: {e}")
+
+bark_model.eval()
+
+# ============================================================
+# IMAGE TRANSFORMS
+# ============================================================
 image_size = 224
-predict_transforms = transforms.Compose([
+leaf_transform = transforms.Compose([
     transforms.Resize(image_size),
     transforms.CenterCrop(image_size),
     transforms.ToTensor(),
     transforms.Normalize([0.485, 0.456, 0.406],
-                         [0.229, 0.224, 0.225])
+                         [0.229, 0.224, 0.225]),
 ])
-
-def image_to_base64(img: Image.Image) -> str:
-    buffered = io.BytesIO()
-    img.save(buffered, format="PNG")
-    return base64.b64encode(buffered.getvalue()).decode("utf-8")
-
-# =========================
-# LEAF PREDICTION
-# =========================
-def predict_leaf(image: Image.Image) -> dict:
-    try:
-        img = image.convert("RGB")
-        img_t = predict_transforms(img)
-        batch_t = torch.unsqueeze(img_t, 0).to(device)
-
-        leaf_model.eval()
-        leaf_model.to(device)
-        with torch.no_grad():
-            outputs = leaf_model(batch_t)
-            probabilities = torch.softmax(outputs, dim=1)[0]
-
-        top5_prob, top5_idx = torch.topk(probabilities, 5)
-        top5_prob = (top5_prob / top5_prob.sum()) * 100
-
-        top_5_predictions = [
-            {"scientific_name": idx_to_class_leaf.get(i.item(), "Unknown"),
-             "probability": round(float(p.item()), 2)}
-            for i, p in zip(top5_idx, top5_prob)
-        ]
-
-        best_idx = int(torch.argmax(probabilities))
-        best_class_name = idx_to_class_leaf.get(best_idx, "Unknown")
-        leaf_info = leaf_data[leaf_data["label"] == best_class_name]
-        best_prediction = {
-            "scientific_name": best_class_name,
-            "common_name": leaf_info.iloc[0].get("common_name", "N/A") if not leaf_info.empty else "N/A",
-            "uses": leaf_info.iloc[0].get("uses", "N/A") if not leaf_info.empty else "N/A",
-            "origin": leaf_info.iloc[0].get("origin", "N/A") if not leaf_info.empty else "N/A",
-        }
-
-        return {"best_prediction": best_prediction, "top_5_predictions": top_5_predictions}
-
-    except Exception as e:
-        return {"error": f"Leaf prediction failed: {str(e)}"}
-
-# =========================
-# LOAD BARK MODEL & DATA
-# =========================
-bark_data = load_csv(BARK_CSV_PATH)
-bark_data.columns = bark_data.columns.str.strip().str.lower().str.replace(" ", "_")
-
-bark_model = models.resnet101(weights=None)
-bark_classes = sorted(bark_data["scientific_name"].unique())
-bark_model.fc = nn.Sequential(
-    nn.Dropout(p=0.4),
-    nn.Linear(bark_model.fc.in_features, len(bark_classes))
-)
-
-# ✅ Fix for PyTorch 2.6+ weights_only behavior
-loaded_bark = torch.load(NEW_BARK_MODEL_PATH, map_location="cpu", weights_only=False)
-sd = _extract_state_dict(loaded_bark)
-if sd:
-    bark_model.load_state_dict(sd, strict=False)
-else:
-    raise RuntimeError("❌ Bark model checkpoint unusable")
-
-bark_model.eval()
 
 bark_transform = transforms.Compose([
     transforms.Resize((224, 224)),
     transforms.ToTensor(),
     transforms.Normalize(mean=[0.485, 0.456, 0.406],
-                         std=[0.229, 0.224, 0.225])
+                         std=[0.229, 0.224, 0.225]),
 ])
 
-# =========================
+# ============================================================
+# IMAGE BASE64 HELPER
+# ============================================================
+def image_to_base64(img: Image.Image) -> str:
+    buf = io.BytesIO()
+    img.save(buf, format="PNG")
+    return base64.b64encode(buf.getvalue()).decode("utf-8")
+
+# ============================================================
+# LEAF PREDICTION
+# ============================================================
+def predict_leaf(image: Image.Image) -> dict:
+    try:
+        img_t = leaf_transform(image.convert("RGB")).unsqueeze(0).to(device)
+        leaf_model.to(device)
+
+        with torch.no_grad():
+            outputs = leaf_model(img_t)
+            probs = torch.softmax(outputs, dim=1)[0]
+
+        top5_prob, top5_idx = torch.topk(probs, 5)
+        top5 = [
+            {"scientific_name": idx_to_class_leaf[i.item()], "probability": round(p.item() * 100, 2)}
+            for i, p in zip(top5_idx, top5_prob)
+        ]
+
+        best_idx = top5_idx[0].item()
+        best_class = idx_to_class_leaf[best_idx]
+        row = leaf_data[leaf_data["label"] == best_class]
+
+        best_prediction = {
+            "scientific_name": best_class,
+            "common_name": row.iloc[0].get("common_name", "N/A") if not row.empty else "N/A",
+            "uses": row.iloc[0].get("uses", "N/A") if not row.empty else "N/A",
+            "origin": row.iloc[0].get("origin", "N/A") if not row.empty else "N/A",
+        }
+
+        return {"best_prediction": best_prediction, "top_5_predictions": top5}
+
+    except Exception as e:
+        return {"error": f"Leaf prediction failed: {str(e)}"}
+
+# ============================================================
 # BARK PREDICTION
-# =========================
+# ============================================================
 def predict_bark(image: Image.Image) -> dict:
     try:
-        img = image.convert("RGB")
-        tensor = bark_transform(img).unsqueeze(0).to(device)
-
-        bark_model.eval()
+        tensor = bark_transform(image.convert("RGB")).unsqueeze(0).to(device)
         bark_model.to(device)
+
         with torch.no_grad():
             outputs = bark_model(tensor)
-            probabilities = torch.softmax(outputs, dim=1)[0].cpu().numpy()
+            probs = torch.softmax(outputs, dim=1)[0].cpu().numpy()
 
-        top5_indices = probabilities.argsort()[-5:][::-1]
-        top5 = [(bark_classes[i], float(probabilities[i] * 100)) for i in top5_indices]
+        top5_idx = probs.argsort()[-5:][::-1]
+        top5 = [
+            {"scientific_name": bark_classes[i], "probability": round(probs[i] * 100, 2)}
+            for i in top5_idx
+        ]
 
-        best_idx = top5_indices[0]
-        best_class = bark_classes[best_idx]
+        best_class = bark_classes[top5_idx[0]]
         row = bark_data[bark_data["scientific_name"].str.lower() == best_class.lower()]
 
         best_prediction = {
@@ -729,14 +739,10 @@ def predict_bark(image: Image.Image) -> dict:
             "origin": row.iloc[0].get("origin", "N/A") if not row.empty else "N/A",
         }
 
-        return {
-            "best_prediction": best_prediction,
-            "top_5_predictions": [
-                {"scientific_name": name, "probability": round(prob, 2)}
-                for name, prob in top5
-            ]
-        }
+        return {"best_prediction": best_prediction, "top_5_predictions": top5}
 
     except Exception as e:
         return {"error": f"Bark prediction failed: {str(e)}"}
+
+
 
