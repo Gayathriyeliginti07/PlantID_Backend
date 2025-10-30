@@ -567,9 +567,7 @@ def load_csv(path):
             return pd.read_csv(path, encoding=enc, engine="python")
         except Exception:
             continue
-    with open(path, "rb") as f:
-        raw = f.read().decode("utf-8", errors="replace")
-    return pd.read_csv(pd.io.common.StringIO(raw), engine="python")
+
 
 # =========================
 # LOAD LEAF MODEL & DATA
@@ -741,10 +739,4 @@ def predict_bark(image: Image.Image) -> dict:
     except Exception as e:
         return {"error": f"An error occurred during bark prediction: {str(e)}"}
 
-# =========================
-# DEBUG INFO
-# =========================
-if __name__ == "__main__":
-    print("✅ Leaf model ready:", LEAF_MODEL_PATH)
-    print("✅ Bark model ready:", NEW_BARK_MODEL_PATH)
-    print("✅ CSVs loaded successfully.")
+
