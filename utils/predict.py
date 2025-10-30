@@ -548,10 +548,10 @@ BARK_CSV_PATH = os.path.join(DATA_DIR, "Bark.csv")
 download_from_drive(LEAF_FILE_ID, LEAF_MODEL_PATH)
 download_from_drive(BARK_FILE_ID, NEW_BARK_MODEL_PATH)
 
-print(f"🔍 LEAF_CSV_PATH → {LEAF_CSV_PATH} (exists: {os.path.exists(LEAF_CSV_PATH)})")
-print(f"🔍 BARK_CSV_PATH → {BARK_CSV_PATH} (exists: {os.path.exists(BARK_CSV_PATH)})")
-print(f"🔍 LEAF_MODEL_PATH → {LEAF_MODEL_PATH} (exists: {os.path.exists(LEAF_MODEL_PATH)})")
-print(f"🔍 BARK_MODEL_PATH → {NEW_BARK_MODEL_PATH} (exists: {os.path.exists(NEW_BARK_MODEL_PATH)})")
+# print(f"🔍 LEAF_CSV_PATH → {LEAF_CSV_PATH} (exists: {os.path.exists(LEAF_CSV_PATH)})")
+# print(f"🔍 BARK_CSV_PATH → {BARK_CSV_PATH} (exists: {os.path.exists(BARK_CSV_PATH)})")
+# print(f"🔍 LEAF_MODEL_PATH → {LEAF_MODEL_PATH} (exists: {os.path.exists(LEAF_MODEL_PATH)})")
+# print(f"🔍 BARK_MODEL_PATH → {NEW_BARK_MODEL_PATH} (exists: {os.path.exists(NEW_BARK_MODEL_PATH)})")
 
 # =========================
 # HELPER FUNCTION: LOAD CSV
@@ -723,4 +723,5 @@ def predict_bark(image: Image.Image) -> dict:
 
     except Exception as e:
         return {"error": f"Bark prediction failed: {str(e)}"}
+
 
