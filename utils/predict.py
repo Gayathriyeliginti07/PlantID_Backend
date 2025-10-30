@@ -487,7 +487,6 @@
 #                 "origin": row.get("origin","N/A"),
 #                 "image": image_to_base64(img)
 #             }}
-
 import os
 import torch
 import torch.nn as nn
@@ -534,24 +533,39 @@ BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 PROJECT_ROOT = os.path.abspath(os.path.join(BASE_DIR, ".."))
 
 MODEL_DIR = os.path.join(PROJECT_ROOT, "model")
-DATA_DIR = os.path.join(PROJECT_ROOT, "data")
-
 os.makedirs(MODEL_DIR, exist_ok=True)
 
 LEAF_MODEL_PATH = os.path.join(MODEL_DIR, "resnet101_leaf_classifier.pth")
 NEW_BARK_MODEL_PATH = os.path.join(MODEL_DIR, "resnet101_final.pth")
 
-LEAF_CSV_PATH = os.path.join(DATA_DIR, "train.csv")
-BARK_CSV_PATH = os.path.join(DATA_DIR, "Bark.csv")
-
 # Auto-download models if missing
 download_from_drive(LEAF_FILE_ID, LEAF_MODEL_PATH)
 download_from_drive(BARK_FILE_ID, NEW_BARK_MODEL_PATH)
 
-# print(f"🔍 LEAF_CSV_PATH → {LEAF_CSV_PATH} (exists: {os.path.exists(LEAF_CSV_PATH)})")
-# print(f"🔍 BARK_CSV_PATH → {BARK_CSV_PATH} (exists: {os.path.exists(BARK_CSV_PATH)})")
-# print(f"🔍 LEAF_MODEL_PATH → {LEAF_MODEL_PATH} (exists: {os.path.exists(LEAF_MODEL_PATH)})")
-# print(f"🔍 BARK_MODEL_PATH → {NEW_BARK_MODEL_PATH} (exists: {os.path.exists(NEW_BARK_MODEL_PATH)})")
+# =========================
+# FLEXIBLE CSV PATH CHECK
+# =========================
+LEAF_CSV_PATH = next((p for p in [
+    os.path.join(PROJECT_ROOT, "data", "train.csv"),
+    os.path.join(BASE_DIR, "data", "train.csv"),
+    os.path.join(PROJECT_ROOT, "backend", "data", "Leaf1", "Leaf1", "train.csv"),
+] if os.path.exists(p)), None)
+
+BARK_CSV_PATH = next((p for p in [
+    os.path.join(PROJECT_ROOT, "data", "Bark.csv"),
+    os.path.join(BASE_DIR, "data", "Bark.csv"),
+    os.path.join(PROJECT_ROOT, "backend", "data", "tree-bark", "Bark.csv"),
+] if os.path.exists(p)), None)
+
+if not LEAF_CSV_PATH or not os.path.exists(LEAF_CSV_PATH):
+    raise FileNotFoundError("❌ Could not find Leaf CSV file in any known location.")
+if not BARK_CSV_PATH or not os.path.exists(BARK_CSV_PATH):
+    raise FileNotFoundError("❌ Could not find Bark CSV file in any known location.")
+
+print(f"✅ Using LEAF_CSV_PATH = {LEAF_CSV_PATH}")
+print(f"✅ Using BARK_CSV_PATH = {BARK_CSV_PATH}")
+print(f"✅ LEAF_MODEL_PATH = {LEAF_MODEL_PATH} (exists: {os.path.exists(LEAF_MODEL_PATH)})")
+print(f"✅ BARK_MODEL_PATH = {NEW_BARK_MODEL_PATH} (exists: {os.path.exists(NEW_BARK_MODEL_PATH)})")
 
 # =========================
 # HELPER FUNCTION: LOAD CSV
@@ -654,7 +668,7 @@ def predict_leaf(image: Image.Image) -> dict:
         return {"best_prediction": best_prediction, "top_5_predictions": top_5_predictions}
 
     except Exception as e:
-        return {"error": f"Prediction failed: {str(e)}"}
+        return {"error": f"Leaf prediction failed: {str(e)}"}
 
 # =========================
 # LOAD BARK MODEL & DATA
@@ -723,5 +737,7 @@ def predict_bark(image: Image.Image) -> dict:
 
     except Exception as e:
         return {"error": f"Bark prediction failed: {str(e)}"}
+
+
 
 
