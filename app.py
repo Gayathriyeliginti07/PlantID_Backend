@@ -115,6 +115,100 @@
 #     app.run(host="0.0.0.0", port=port)
 
 
+# import os
+# import logging
+# from flask import Flask, request, jsonify
+# from flask_cors import CORS
+# from PIL import Image
+# import io
+# from utils.predict import predict_leaf, predict_bark
+
+# # -------------------------------
+# # Logging Configuration
+# # -------------------------------
+# logging.basicConfig(
+#     level=logging.INFO,
+#     format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
+# )
+# logger = logging.getLogger("plantid-backend")
+
+# # -------------------------------
+# # Flask App Setup
+# # -------------------------------
+# app = Flask(__name__)
+# CORS(app)  # Enable Cross-Origin Resource Sharing
+
+# # -------------------------------
+# # Routes
+# # -------------------------------
+# @app.route("/", methods=["GET"])
+# def home():
+#     """Root route for quick sanity check."""
+#     return jsonify({"message": "✅ PlantID Backend Running Successfully"}), 200
+
+
+# @app.route("/predict_leaf", methods=["POST"])
+# def predict_leaf_route():
+#     """Handles leaf image prediction requests."""
+#     if "file" not in request.files:
+#         return jsonify({"error": "No file uploaded (field name must be 'file')"}), 400
+
+#     file = request.files["file"]
+#     try:
+#         image = Image.open(io.BytesIO(file.read())).convert("RGB")
+#     except Exception as e:
+#         logger.exception("Failed to read uploaded image for leaf prediction")
+#         return jsonify({"error": f"Invalid image file: {str(e)}"}), 400
+
+#     try:
+#         prediction = predict_leaf(image)
+#         if isinstance(prediction, dict) and "error" in prediction:
+#             logger.error("Leaf model returned error: %s", prediction["error"])
+#             return jsonify(prediction), 500
+#         return jsonify(prediction), 200
+#     except Exception as e:
+#         logger.exception("Leaf prediction failed")
+#         return jsonify({"error": f"Leaf prediction failed: {str(e)}"}), 500
+
+
+# @app.route("/predict_bark", methods=["POST"])
+# def predict_bark_route():
+#     """Handles bark image prediction requests."""
+#     if "file" not in request.files:
+#         return jsonify({"error": "No file uploaded (field name must be 'file')"}), 400
+
+#     file = request.files["file"]
+#     try:
+#         image = Image.open(io.BytesIO(file.read())).convert("RGB")
+#     except Exception as e:
+#         logger.exception("Failed to read uploaded image for bark prediction")
+#         return jsonify({"error": f"Invalid image file: {str(e)}"}), 400
+
+#     try:
+#         prediction = predict_bark(image)
+#         if isinstance(prediction, dict) and "error" in prediction:
+#             logger.error("Bark model returned error: %s", prediction["error"])
+#             return jsonify(prediction), 500
+#         return jsonify(prediction), 200
+#     except Exception as e:
+#         logger.exception("Bark prediction failed")
+#         return jsonify({"error": f"Bark prediction failed: {str(e)}"}), 500
+
+
+# @app.route("/health", methods=["GET"])
+# def health():
+#     """Health check route for Render readiness probe."""
+#     return jsonify({"status": "ok"}), 200
+
+
+# # -------------------------------
+# # Entry Point
+# # -------------------------------
+# if __name__ == "__main__":
+#     port = int(os.environ.get("PORT", 5000))
+#     logger.info("Starting PlantID Backend on 0.0.0.0:%s", port)
+#     app.run(host="0.0.0.0", port=port)
+
 import os
 import logging
 from flask import Flask, request, jsonify
@@ -123,35 +217,30 @@ from PIL import Image
 import io
 from utils.predict import predict_leaf, predict_bark
 
-# -------------------------------
-# Logging Configuration
-# -------------------------------
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
-)
+# Setup logging
+logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("plantid-backend")
 
-# -------------------------------
-# Flask App Setup
-# -------------------------------
 app = Flask(__name__)
-CORS(app)  # Enable Cross-Origin Resource Sharing
+CORS(app)  # Allow frontend to access API
 
-# -------------------------------
-# Routes
-# -------------------------------
 @app.route("/", methods=["GET"])
 def home():
-    """Root route for quick sanity check."""
     return jsonify({"message": "✅ PlantID Backend Running Successfully"}), 200
 
-
+# -------- Leaf Prediction Route --------
 @app.route("/predict_leaf", methods=["POST"])
 def predict_leaf_route():
-    """Handles leaf image prediction requests."""
+    data = request.get_json(silent=True)
+
+    # Support image URL input
+    if data and "image_url" in data:
+        prediction = predict_leaf(data["image_url"])
+        return jsonify(prediction), 200
+
+    # Support file upload
     if "file" not in request.files:
-        return jsonify({"error": "No file uploaded (field name must be 'file')"}), 400
+        return jsonify({"error": "No file uploaded or image_url provided"}), 400
 
     file = request.files["file"]
     try:
@@ -160,22 +249,22 @@ def predict_leaf_route():
         logger.exception("Failed to read uploaded image for leaf prediction")
         return jsonify({"error": f"Invalid image file: {str(e)}"}), 400
 
-    try:
-        prediction = predict_leaf(image)
-        if isinstance(prediction, dict) and "error" in prediction:
-            logger.error("Leaf model returned error: %s", prediction["error"])
-            return jsonify(prediction), 500
-        return jsonify(prediction), 200
-    except Exception as e:
-        logger.exception("Leaf prediction failed")
-        return jsonify({"error": f"Leaf prediction failed: {str(e)}"}), 500
+    prediction = predict_leaf(image)
+    return jsonify(prediction), 200
 
-
+# -------- Bark Prediction Route --------
 @app.route("/predict_bark", methods=["POST"])
 def predict_bark_route():
-    """Handles bark image prediction requests."""
+    data = request.get_json(silent=True)
+
+    # Support image URL input
+    if data and "image_url" in data:
+        prediction = predict_bark(data["image_url"])
+        return jsonify(prediction), 200
+
+    # Support file upload
     if "file" not in request.files:
-        return jsonify({"error": "No file uploaded (field name must be 'file')"}), 400
+        return jsonify({"error": "No file uploaded or image_url provided"}), 400
 
     file = request.files["file"]
     try:
@@ -184,30 +273,25 @@ def predict_bark_route():
         logger.exception("Failed to read uploaded image for bark prediction")
         return jsonify({"error": f"Invalid image file: {str(e)}"}), 400
 
-    try:
-        prediction = predict_bark(image)
-        if isinstance(prediction, dict) and "error" in prediction:
-            logger.error("Bark model returned error: %s", prediction["error"])
-            return jsonify(prediction), 500
-        return jsonify(prediction), 200
-    except Exception as e:
-        logger.exception("Bark prediction failed")
-        return jsonify({"error": f"Bark prediction failed: {str(e)}"}), 500
+    prediction = predict_bark(image)
+    return jsonify(prediction), 200
 
-
+# Health-check route for Render
 @app.route("/health", methods=["GET"])
 def health():
-    """Health check route for Render readiness probe."""
     return jsonify({"status": "ok"}), 200
 
+# Optional: handle favicon 404 gracefully
+@app.route("/favicon.ico")
+def favicon():
+    return '', 204
 
-# -------------------------------
-# Entry Point
-# -------------------------------
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 5000))
-    logger.info("Starting PlantID Backend on 0.0.0.0:%s", port)
+    logger.info(f"🚀 Starting PlantID Backend on 0.0.0.0:{port}")
     app.run(host="0.0.0.0", port=port)
+
+
 
 
 
