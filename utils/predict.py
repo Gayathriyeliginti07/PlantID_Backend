@@ -989,51 +989,147 @@
 #     print("✅ Leaf CSV path:", LEAF_CSV_PATH)
 #     print("✅ Bark CSV path:", BARK_CSV_PATH)
 
+# import torch
+# import torch.nn as nn
+# import torchvision.transforms as transforms
+# from torchvision import models
+# from PIL import Image
+# import os
+# import logging
+# import requests
+# from io import BytesIO
+
+# # Initialize logger
+# logger = logging.getLogger("plantid-predict")
+
+# # Directories
+# MODEL_DIR = os.path.join(os.path.dirname(__file__), "../model")
+# os.makedirs(MODEL_DIR, exist_ok=True)
+
+# # Google Drive model links
+# MODEL_URLS = {
+#     "leaf": "https://drive.google.com/uc?id=12U8nEDWS4chnW71VaUMYwjP9VNXqIMqM",
+#     "bark": "https://drive.google.com/uc?id=1G8-fXTN0DWcBKfKysxzlBN8zLGvYeKyc"
+# }
+
+# # Model paths
+# LEAF_MODEL_PATH = os.path.join(MODEL_DIR, "resnet101_leaf_classifier.pth")
+# BARK_MODEL_PATH = os.path.join(MODEL_DIR, "resnet101_final.pth")
+
+# # Download model if not exists
+# def download_model(url, path):
+#     if not os.path.exists(path):
+#         logger.info(f"⬇️ Downloading model from Google Drive → {path}")
+#         response = requests.get(url, stream=True)
+#         response.raise_for_status()
+#         with open(path, "wb") as f:
+#             for chunk in response.iter_content(chunk_size=8192):
+#                 f.write(chunk)
+#         logger.info(f"✅ Model downloaded successfully: {path}")
+
+# download_model(MODEL_URLS["leaf"], LEAF_MODEL_PATH)
+# download_model(MODEL_URLS["bark"], BARK_MODEL_PATH)
+
+# # Device config
+# DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+
+# # Transforms
+# transform = transforms.Compose([
+#     transforms.Resize((224, 224)),
+#     transforms.ToTensor(),
+#     transforms.Normalize(mean=[0.485, 0.456, 0.406],
+#                          std=[0.229, 0.224, 0.225])
+# ])
+
+# # Class labels (adjust as per your training)
+# LEAF_CLASSES = ["Neem", "Mango", "Guava", "Banana", "Jasmine", "Tulsi"]
+# BARK_CLASSES = ["Teak", "Neem", "Mango", "Guava", "Eucalyptus", "Banyan"]
+
+# # Load model
+# def load_model(model_path, num_classes):
+#     model = models.resnet101(weights=None)
+#     model.fc = nn.Linear(model.fc.in_features, num_classes)
+#     try:
+#         model.load_state_dict(torch.load(model_path, map_location=DEVICE))
+#         model.to(DEVICE)
+#         model.eval()
+#         logger.info(f"✅ Loaded model: {model_path}")
+#         return model
+#     except Exception as e:
+#         logger.error(f"❌ Error loading model {model_path}: {e}")
+#         return None
+
+# # Initialize models
+# leaf_model = load_model(LEAF_MODEL_PATH, len(LEAF_CLASSES))
+# bark_model = load_model(BARK_MODEL_PATH, len(BARK_CLASSES))
+
+# # Load image (from file, bytes, or URL)
+# def load_image(image_input):
+#     try:
+#         if isinstance(image_input, Image.Image):
+#             return image_input.convert("RGB")
+#         elif isinstance(image_input, str) and image_input.startswith("http"):
+#             response = requests.get(image_input)
+#             response.raise_for_status()
+#             return Image.open(BytesIO(response.content)).convert("RGB")
+#         else:
+#             return Image.open(BytesIO(image_input)).convert("RGB")
+#     except Exception as e:
+#         raise ValueError(f"Invalid image or URL: {e}")
+
+# # Predict helper
+# def predict(model, image, class_names):
+#     try:
+#         image_t = transform(image).unsqueeze(0).to(DEVICE)
+#         with torch.no_grad():
+#             outputs = model(image_t)
+#             _, pred = torch.max(outputs, 1)
+#             return {"prediction": class_names[pred.item()]}
+#     except Exception as e:
+#         logger.exception("Prediction failed")
+#         return {"error": f"Prediction failed: {e}"}
+
+# # Prediction endpoints
+# def predict_leaf(image_input):
+#     if leaf_model is None:
+#         return {"error": "Leaf model not loaded"}
+#     try:
+#         image = load_image(image_input)
+#         return predict(leaf_model, image, LEAF_CLASSES)
+#     except Exception as e:
+#         return {"error": f"Leaf prediction failed: {e}"}
+
+# def predict_bark(image_input):
+#     if bark_model is None:
+#         return {"error": "Bark model not loaded"}
+#     try:
+#         image = load_image(image_input)
+#         return predict(bark_model, image, BARK_CLASSES)
+#     except Exception as e:
+        # return {"error": f"Bark prediction failed: {e}"}
+
+
+# utils/predict.py
 import torch
 import torch.nn as nn
 import torchvision.transforms as transforms
 from torchvision import models
-from PIL import Image
 import os
+from PIL import Image
 import logging
-import requests
-from io import BytesIO
 
-# Initialize logger
+# Set up logging
 logger = logging.getLogger("plantid-predict")
 
-# Directories
-MODEL_DIR = os.path.join(os.path.dirname(__file__), "../model")
-os.makedirs(MODEL_DIR, exist_ok=True)
-
-# Google Drive model links
-MODEL_URLS = {
-    "leaf": "https://drive.google.com/uc?id=12U8nEDWS4chnW71VaUMYwjP9VNXqIMqM",
-    "bark": "https://drive.google.com/uc?id=1G8-fXTN0DWcBKfKysxzlBN8zLGvYeKyc"
-}
-
-# Model paths
+# Paths to models
+MODEL_DIR = os.path.join(os.path.dirname(__file__), "..", "model")
 LEAF_MODEL_PATH = os.path.join(MODEL_DIR, "resnet101_leaf_classifier.pth")
 BARK_MODEL_PATH = os.path.join(MODEL_DIR, "resnet101_final.pth")
 
-# Download model if not exists
-def download_model(url, path):
-    if not os.path.exists(path):
-        logger.info(f"⬇️ Downloading model from Google Drive → {path}")
-        response = requests.get(url, stream=True)
-        response.raise_for_status()
-        with open(path, "wb") as f:
-            for chunk in response.iter_content(chunk_size=8192):
-                f.write(chunk)
-        logger.info(f"✅ Model downloaded successfully: {path}")
+# Device
+device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
-download_model(MODEL_URLS["leaf"], LEAF_MODEL_PATH)
-download_model(MODEL_URLS["bark"], BARK_MODEL_PATH)
-
-# Device config
-DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-
-# Transforms
+# Define transformation
 transform = transforms.Compose([
     transforms.Resize((224, 224)),
     transforms.ToTensor(),
@@ -1041,71 +1137,74 @@ transform = transforms.Compose([
                          std=[0.229, 0.224, 0.225])
 ])
 
-# Class labels (adjust as per your training)
-LEAF_CLASSES = ["Neem", "Mango", "Guava", "Banana", "Jasmine", "Tulsi"]
-BARK_CLASSES = ["Teak", "Neem", "Mango", "Guava", "Eucalyptus", "Banyan"]
-
-# Load model
+# Load model safely with fallback for PyTorch 2.6+
 def load_model(model_path, num_classes):
     model = models.resnet101(weights=None)
     model.fc = nn.Linear(model.fc.in_features, num_classes)
-    try:
-        model.load_state_dict(torch.load(model_path, map_location=DEVICE))
-        model.to(DEVICE)
-        model.eval()
-        logger.info(f"✅ Loaded model: {model_path}")
-        return model
-    except Exception as e:
-        logger.error(f"❌ Error loading model {model_path}: {e}")
+
+    if not os.path.exists(model_path):
+        logger.error("Model not found: %s", model_path)
         return None
 
-# Initialize models
-leaf_model = load_model(LEAF_MODEL_PATH, len(LEAF_CLASSES))
-bark_model = load_model(BARK_MODEL_PATH, len(BARK_CLASSES))
-
-# Load image (from file, bytes, or URL)
-def load_image(image_input):
     try:
-        if isinstance(image_input, Image.Image):
-            return image_input.convert("RGB")
-        elif isinstance(image_input, str) and image_input.startswith("http"):
-            response = requests.get(image_input)
-            response.raise_for_status()
-            return Image.open(BytesIO(response.content)).convert("RGB")
-        else:
-            return Image.open(BytesIO(image_input)).convert("RGB")
+        # Try new PyTorch behavior (safe)
+        state_dict = torch.load(model_path, map_location=device, weights_only=True)
+    except TypeError:
+        # Older versions of torch may not support weights_only param
+        state_dict = torch.load(model_path, map_location=device)
     except Exception as e:
-        raise ValueError(f"Invalid image or URL: {e}")
+        logger.warning("⚠️ Safe load failed (%s), retrying with weights_only=False", e)
+        # Force allow full pickle load (only if you trust the file)
+        state_dict = torch.load(model_path, map_location=device, weights_only=False)
 
-# Predict helper
-def predict(model, image, class_names):
-    try:
-        image_t = transform(image).unsqueeze(0).to(DEVICE)
-        with torch.no_grad():
-            outputs = model(image_t)
-            _, pred = torch.max(outputs, 1)
-            return {"prediction": class_names[pred.item()]}
-    except Exception as e:
-        logger.exception("Prediction failed")
-        return {"error": f"Prediction failed: {e}"}
+    # Load weights
+    model.load_state_dict(state_dict, strict=False)
+    model.to(device)
+    model.eval()
+    return model
 
-# Prediction endpoints
-def predict_leaf(image_input):
-    if leaf_model is None:
-        return {"error": "Leaf model not loaded"}
-    try:
-        image = load_image(image_input)
-        return predict(leaf_model, image, LEAF_CLASSES)
-    except Exception as e:
-        return {"error": f"Leaf prediction failed: {e}"}
 
-def predict_bark(image_input):
-    if bark_model is None:
-        return {"error": "Bark model not loaded"}
-    try:
-        image = load_image(image_input)
-        return predict(bark_model, image, BARK_CLASSES)
-    except Exception as e:
-        return {"error": f"Bark prediction failed: {e}"}
+# Lazy load models (only once)
+_leaf_model = None
+_bark_model = None
+
+
+def get_leaf_model():
+    global _leaf_model
+    if _leaf_model is None:
+        logger.info("Loading leaf model from %s", LEAF_MODEL_PATH)
+        _leaf_model = load_model(LEAF_MODEL_PATH, num_classes=5)  # adjust num_classes
+    return _leaf_model
+
+
+def get_bark_model():
+    global _bark_model
+    if _bark_model is None:
+        logger.info("Loading bark model from %s", BARK_MODEL_PATH)
+        _bark_model = load_model(BARK_MODEL_PATH, num_classes=5)  # adjust num_classes
+    return _bark_model
+
+
+# Predict functions
+def predict_leaf(image: Image.Image):
+    model = get_leaf_model()
+    if model is None:
+        return {"error": "Leaf model not available"}
+    img_t = transform(image).unsqueeze(0).to(device)
+    with torch.no_grad():
+        outputs = model(img_t)
+        _, pred = torch.max(outputs, 1)
+    return {"prediction": f"Leaf class {pred.item()}"}
+
+
+def predict_bark(image: Image.Image):
+    model = get_bark_model()
+    if model is None:
+        return {"error": "Bark model not available"}
+    img_t = transform(image).unsqueeze(0).to(device)
+    with torch.no_grad():
+        outputs = model(img_t)
+        _, pred = torch.max(outputs, 1)
+    return {"prediction": f"Bark class {pred.item()}"}
 
 
